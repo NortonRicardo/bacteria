@@ -1,0 +1,16 @@
+name: bactera
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - numpy
+  - matplotlib
+  - scipy
+  - scikit-learn
+  - pandas
+  - seaborn
+  - jupyterlab
+  - ipykernel
+  - spectral        # ENVI hyperspectral file I/O
+  - opencv          # detecção de círculos (HoughCircles)
