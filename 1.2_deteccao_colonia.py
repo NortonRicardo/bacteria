@@ -155,10 +155,35 @@ def plotar_antes_depois(imagem: np.ndarray, mascara: np.ndarray,
     plt.show()
 
 
-def processar_amostra_roi(sample_dir: Path, visualizar: bool = True) -> pd.DataFrame:
+def plotar_mosaico(imagens: dict, titulo: str, cols: int = 4):
+    """Plota mosaico resumo de todas as amostras (imagens 2D float com NaN)."""
+    n    = len(imagens)
+    rows = -(-n // cols)
+    cmap = plt.get_cmap("jet").copy()
+    cmap.set_bad("black")
+
+    fig, axes = plt.subplots(rows, cols, figsize=(cols * 4, rows * 4))
+    axes = np.atleast_1d(axes).flatten()
+
+    for ax, (nome, img) in zip(axes, imagens.items()):
+        ax.imshow(np.ma.masked_invalid(img), cmap=cmap, vmin=0, vmax=1)
+        ax.set_title(nome[:18], fontsize=8)
+        ax.axis("off")
+
+    for ax in axes[n:]:
+        ax.set_visible(False)
+
+    fig.suptitle(titulo, fontsize=13, y=1.01)
+    plt.tight_layout()
+    plt.show()
+
+
+def processar_amostra_roi(sample_dir: Path, visualizar: bool = True
+                          ) -> tuple[pd.DataFrame, np.ndarray, np.ndarray]:
     """Pipeline completo de uma amostra: calibra → corta → detecta → mascara.
 
-    Retorna DataFrame (n_pixels_roi × n_bandas + coluna 'sample').
+    Retorna (df, img_demarcada, img_recortada) onde as imagens são a banda
+    BAND_VIZ normalizada [0,1] — demarcada com círculo, recortada com NaN fora.
     Se o Hough falhar, usa máscara full-image como fallback.
     """
     name = sample_dir.name
@@ -183,11 +208,25 @@ def processar_amostra_roi(sample_dir: Path, visualizar: bool = True) -> pd.DataF
     if visualizar:
         plotar_antes_depois(cortada, mascara, circulo, name)
 
+    # imagens 2D normalizadas para os mosaicos finais
+    banda = cortada[:, :, BAND_VIZ].astype(np.float32)
+    vmin, vmax = np.percentile(banda, [2, 98])
+    banda_norm = np.clip((banda - vmin) / (vmax - vmin + 1e-9), 0, 1)
+
+    img_demarcada = banda_norm.copy()
+    if circulo is not None:
+        img_demarcada_u8 = (banda_norm * 255).astype(np.uint8)
+        cx, cy, r = circulo
+        cv2.circle(img_demarcada_u8, (cx, cy), r, 255, thickness=2)
+        img_demarcada = img_demarcada_u8.astype(np.float32) / 255.0
+
+    img_recortada = np.where(mascara, banda_norm, np.nan)
+
     pixels  = cortada[mascara]
     colunas = [f"band_{i}" for i in range(pixels.shape[1])]
     df = pd.DataFrame(pixels, columns=colunas)
     df.insert(0, "sample", name)
-    return df
+    return df, img_demarcada, img_recortada
 
 
 # ---------------------------------------------------------------------------
@@ -196,16 +235,25 @@ def processar_amostra_roi(sample_dir: Path, visualizar: bool = True) -> pd.DataF
 
 def construir_dataframe_roi(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     sample_dirs = sorted(d for d in data_dir.iterdir() if d.is_dir())
-    partes = []
+    partes          = []
+    demarcadas      = {}
+    recortadas      = {}
 
     for sd in sample_dirs:
         print(f"  {sd.name} ...", end=" ", flush=True)
-        df_roi = processar_amostra_roi(sd, visualizar=True)
+        df_roi, img_dem, img_rec = processar_amostra_roi(sd, visualizar=True)
         partes.append(df_roi)
+        demarcadas[sd.name] = img_dem
+        recortadas[sd.name] = img_rec
         print(f"{len(df_roi):,} pixels")
+
+    plotar_mosaico(demarcadas, "Mosaico — círculo demarcado (CHT)")
+    plotar_mosaico(recortadas, "Mosaico — imagens recortadas pela ROI")
 
     return pd.concat(partes, ignore_index=True)
 
+
+PICKLE_PATH = DATA_DIR / "roi.pkl"
 
 if __name__ == "__main__":
     print(f"Detectando colônias em '{DATA_DIR}' ...\n")
@@ -214,3 +262,6 @@ if __name__ == "__main__":
     print(f"\nDataFrame ROI final:")
     print(f"  {len(df):,} pixels  |  {df['sample'].nunique()} amostras  |  {df.shape[1]-1} bandas")
     print(df.groupby("sample").size().rename("pixels_roi").to_string())
+
+    df.to_pickle(PICKLE_PATH)
+    print(f"\nSalvo em '{PICKLE_PATH}'")

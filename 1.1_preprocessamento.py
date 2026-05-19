@@ -6,6 +6,7 @@ e corte de bandas ruidosas, e consolida tudo em um único DataFrame.
 
 import numpy as np
 import pandas as pd
+import spectral.io.envi as envi
 from pathlib import Path
 
 DATA_DIR = Path("data")
@@ -17,46 +18,11 @@ N_BANDAS_FIM    = 25  # bandas a remover do final  (ruído do sensor)
 # Funções auxiliares de I/O
 # ---------------------------------------------------------------------------
 
-def _parse_hdr(hdr_path: Path) -> dict:
-    """Lê um arquivo .hdr ENVI e retorna um dicionário de metadados."""
-    import re
-    meta = {}
-    text = hdr_path.read_text()
-
-    for key, value in re.findall(r'([\w ]+)\s*=\s*\{([^}]*)\}', text, re.DOTALL):
-        items = [v.strip() for v in re.split(r'[\n,]', value) if v.strip()]
-        try:
-            meta[key.strip().lower()] = [float(i) for i in items]
-        except ValueError:
-            meta[key.strip().lower()] = items
-
-    for line in text.splitlines():
-        if '=' in line and '{' not in line:
-            key, _, val = line.partition('=')
-            key, val = key.strip().lower(), val.strip()
-            if key in meta:
-                continue
-            try:
-                meta[key] = int(val)
-            except ValueError:
-                try:
-                    meta[key] = float(val)
-                except ValueError:
-                    meta[key] = val.lower()
-    return meta
-
-
 def _load_raw(hdr_path: Path) -> np.ndarray:
-    """Carrega um arquivo .raw ENVI e retorna array (lines, samples, bands)."""
+    """Carrega um arquivo .raw ENVI via spectral e retorna (lines, samples, bands)."""
     raw_path = hdr_path.with_suffix('.raw')
-    meta = _parse_hdr(hdr_path)
-
-    lines   = int(meta['lines'])
-    samples = int(meta['samples'])
-    bands   = int(meta['bands'])
-
-    data = np.fromfile(raw_path, dtype='<u2').reshape(lines, bands, samples)
-    return np.transpose(data, (0, 2, 1)).astype(np.float32)  # (lines, samples, bands)
+    img = envi.open(str(hdr_path), image=str(raw_path))
+    return np.asarray(img[:, :, :], dtype=np.float32)
 
 
 # ---------------------------------------------------------------------------

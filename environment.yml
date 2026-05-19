@@ -14,3 +14,4 @@ dependencies:
   - ipykernel
   - spectral        # ENVI hyperspectral file I/O
   - opencv          # detecção de círculos (HoughCircles)
+  - pyarrow         # leitura/escrita de Parquet
