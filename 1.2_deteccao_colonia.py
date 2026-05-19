@@ -77,7 +77,11 @@ def detectar_circulo_hough(imagem: np.ndarray) -> tuple | None:
     Retorna (cx, cy, raio) ou None se nenhum candidato encontrado.
     """
     gray = cv2.cvtColor(rgb_sintetico(imagem), cv2.COLOR_RGB2GRAY)
-    gray = cv2.equalizeHist(gray)
+    # median blur suprime scan lines horizontais antes da equalização
+    gray = cv2.medianBlur(gray, 5)
+    # CLAHE: equalização local — não amplifica as linhas de varredura
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    gray = clahe.apply(gray)
     gray = cv2.GaussianBlur(gray, (7, 7), 1.5)
 
     h, w = gray.shape
