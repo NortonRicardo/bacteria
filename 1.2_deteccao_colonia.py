@@ -351,7 +351,9 @@ def processar_amostra_roi(sample_dir: Path, visualizar: bool = True
     df = pd.DataFrame(pixels, columns=colunas)
     df.insert(0, "sample", name)
 
-    return df, img_demarcada, img_recortada
+    # também retorna a máscara booleana — necessária no 2.3 para reconstruir
+    # os mapas espaciais de clusters (projetar labels de volta na imagem 2D)
+    return df, img_demarcada, img_recortada, mascara
 
 
 # ---------------------------------------------------------------------------
@@ -366,25 +368,28 @@ def construir_dataframe_roi(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     Também acumula as imagens 2D para exibir dois mosaicos ao final:
       1. todas as colônias com o círculo demarcado (diagnóstico da detecção)
       2. todas as colônias já recortadas pela ROI (resultado final)
+    As máscaras booleanas são salvas em masks.pkl para uso no 2.3.
     """
     sample_dirs = sorted(d for d in data_dir.iterdir() if d.is_dir())
     partes     = []
     demarcadas = {}
     recortadas = {}
+    masks      = {}  # {nome: ndarray bool (H, W)} — persistido para o 2.3
 
     for sd in sample_dirs:
         print(f"  {sd.name} ...", end=" ", flush=True)
-        df_roi, img_dem, img_rec = processar_amostra_roi(sd, visualizar=True)
+        df_roi, img_dem, img_rec, mascara = processar_amostra_roi(sd, visualizar=True)
         partes.append(df_roi)
         demarcadas[sd.name] = img_dem
         recortadas[sd.name] = img_rec
+        masks[sd.name]      = mascara
         print(f"{len(df_roi):,} pixels")
 
     # mosaicos finais — visão geral de todas as amostras de uma vez
     plotar_mosaico(demarcadas, "Mosaico — círculo demarcado (CHT)")
     plotar_mosaico(recortadas, "Mosaico — imagens recortadas pela ROI")
 
-    return pd.concat(partes, ignore_index=True)
+    return pd.concat(partes, ignore_index=True), masks
 
 
 # ---------------------------------------------------------------------------
@@ -392,10 +397,11 @@ def construir_dataframe_roi(data_dir: Path = DATA_DIR) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 PICKLE_PATH = DATA_DIR / "roi.pkl"
+MASKS_PATH  = DATA_DIR / "masks.pkl"
 
 if __name__ == "__main__":
     print(f"Detectando colônias em '{DATA_DIR}' ...\n")
-    df = construir_dataframe_roi()
+    df, masks = construir_dataframe_roi()
 
     print(f"\nDataFrame ROI final:")
     print(f"  {len(df):,} pixels  |  {df['sample'].nunique()} amostras  |  {df.shape[1]-1} bandas")
@@ -404,4 +410,11 @@ if __name__ == "__main__":
     # pickle preserva os dtypes float32 exatos sem conversão e não sofre do
     # problema de duplo-registro do pyarrow quando executado via %run no Jupyter
     df.to_pickle(PICKLE_PATH)
-    print(f"\nSalvo em '{PICKLE_PATH}'")
+    print(f"Salvo em '{PICKLE_PATH}'")
+
+    # salva as máscaras ROI de cada amostra para uso no 2.3
+    # (necessárias para reprojetar os labels K-Means de volta ao espaço 2D)
+    import pickle
+    with open(MASKS_PATH, "wb") as f:
+        pickle.dump(masks, f)
+    print(f"Salvo em '{MASKS_PATH}'")
